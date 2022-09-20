@@ -1,0 +1,9 @@
+{
+  "name": null,
+  "sbws": "D:/gis_database/usa/oklahoma/SBWs_2000_01_01_to_2020_08_27/SBWs_2000_01_01_to_2020_08_27.shp",
+  "damage_polygons": "D:/gis_database/usa/NationalWeatherService/Damage/Damage_Polygons_SDE/Damage_Polygons_SDE.shp",
+  "waypoints": "D:/PythonProjects/project-william-2021-06/waypoints/OKLAHOMA_300m_nwpt_145778_random_steiner_zone_20210730_164331.csv",
+  "waypoints_rec": "D:/PythonProjects/project-william-2021-06/waypoints/OKLAHOMA_300m_nwpt_237896_rectangular_20210730_164331.csv",
+  "crs": "EPSG:26914",
+  "r_scan": 300
+}

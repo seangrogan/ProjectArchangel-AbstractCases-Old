@@ -1,0 +1,10 @@
+{
+  "name": null,
+  "sbws": "zip://G:/wfo_data/wwa_OUN_TSA_AMA_SHV_LZK_LCH_LIX_JAN_MEG_HUN_BMX_MOB_FFC_TAE_JAX_CHS_PAH_OHX_MRX_LMK_JKL_20000101_20220615_Combined.zip",
+  "damage_polygons": "D:/gis_database/usa/NationalWeatherService/Damage/Damage_Polygons_SDE/Damage_Polygons_SDE.shp",
+  "waypoints": "G:/project-archangel-spatial-data/road-data/_waypoint_data/waypoints_300m_nwpt_1462752_hexagonT_20220621_174832_crs_ESRI_102039.csv",
+  "waypoints_rec": "D:/PythonProjects/project-william-2021-06/waypoints/OKLAHOMA_300m_nwpt_237896_rectangular_20210730_164331.csv",
+  "crs": "ESRI:102039",
+  "tornado_cases_pickle": "D:/PythonProjects/ProjectArchangel/pickles/py_pickle_300m",
+  "r_scan": 300
+}
