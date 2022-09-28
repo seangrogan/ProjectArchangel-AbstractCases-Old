@@ -32,7 +32,8 @@ def main(bounds=None, n_wpt=None, random_seed=None, plot=True):
 
     waypoints_data = create_waypoint_table(waypoints, sbw, damage, 1)
     if plot:
-        plotter(plot, waypoints, sbw, _verts, damage, pt)
+        plotter(plot, waypoints, sbw, _verts, damage, pt,
+                path=f"", title=f"")
     dist_matrix = pd.DataFrame(squareform(pdist(waypoints)), columns=waypoints, index=waypoints)
     dynamic_route_with_init_route(waypoints, waypoints_data, dist_matrix)
 
@@ -49,10 +50,11 @@ def create_waypoint_table(waypoints, sbw, damage, r_scan, default_score=0.5):
             "damaged": is_inside(waypoint, damage, r_scan),
             "in_sbw": is_inside(waypoint, sbw, r_scan),
             "score": default_score * is_inside(waypoint, sbw, r_scan),
-            "base_score" :  default_score * is_inside(waypoint, sbw, r_scan),
+            "base_score": default_score * is_inside(waypoint, sbw, r_scan),
+            "group_score": default_score * is_inside(waypoint, sbw, r_scan),
             "visited": False,
-            "_wp":waypoint,
-            "_wp_x":waypoint[0],
+            "_wp": waypoint,
+            "_wp_x": waypoint[0],
             "_wp_y": waypoint[1],
         }
         for waypoint in tqdm(waypoints)
@@ -60,7 +62,7 @@ def create_waypoint_table(waypoints, sbw, damage, r_scan, default_score=0.5):
     return pd.DataFrame(data).transpose()
 
 
-def plotter(plot, waypoints, sbw, _verts, damage, pt):
+def plotter(plot, waypoints, sbw, _verts, damage, pt, path, title):
     if plot:
         x, y = zip(*waypoints)
         plt.scatter(x, y)
@@ -72,9 +74,10 @@ def plotter(plot, waypoints, sbw, _verts, damage, pt):
         plt.scatter(x, y)
         x, y = damage.exterior.xy
         plt.plot(x, y, color='yellow')
-        automkdir(f"./plots/test{datetime_string(current=True)}.png")
-        plt.savefig(f"./plots/test{datetime_string(current=True)}.png")
-        plt.show()
+        plt.title(title)
+        automkdir(path)
+        plt.savefig(path)
+        # plt.show()
         plt.close()
 
     return waypoints, sbw, damage
@@ -182,3 +185,4 @@ if __name__ == '__main__':
     # main(random_seed=12345)
     # for i in [8675309, 19900305, 19890504]:
     main(bounds=(0, 5000, 0, 5000), n_wpt=1250, random_seed=8675309, plot=True)
+    # main(bounds=(0, 50, 0, 50), n_wpt=500, random_seed=8675309, plot=True)

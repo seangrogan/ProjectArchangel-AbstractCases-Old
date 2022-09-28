@@ -1,8 +1,6 @@
 import copy
 from collections import namedtuple
-import concurrent.futures
 import math
-from multiprocessing import Process
 
 import numpy as np
 import pandas as pd
@@ -12,18 +10,32 @@ from tqdm import tqdm
 from utilities import euclidean, datetime_string, automkdir
 
 
-def update_scores(waypoints_data, influence_matrix):
-    def update_waypoint_data_function(row, waypoints_data, influence_matrix):
-        if row.visited and row.damaged:
+def update_scores(waypoints_data, influence_matrix, distance_matrix, influence_range):
+    def update_waypoint_score(_row, _waypoints_data, _influence_matrix):
+        if _row.visited and _row.damaged:
             return 1
-        if row.visited and not row.damaged:
+        if _row.visited and not _row.damaged:
             return 0
-        wp = row["_wp"]
-        score = influence_matrix[wp].multiply(waypoints_data['base_score']).sum() / influence_matrix[wp].sum()
+        wp = _row["_wp"]
+        score = _influence_matrix[wp].multiply(_waypoints_data['base_score']).sum() / _influence_matrix[wp].sum()
+        return min(max(score, 0), 1)
+
+    def update_waypoint_group_score(_row, _waypoints_data, _distance_matrix, _influence_range):
+        if _row.visited and _row.damaged:
+            return 1
+        if _row.visited and not _row.damaged:
+            return 0
+        wp = _row["_wp"]
+        nearby_wpts = list(_distance_matrix[wp][_distance_matrix[wp] <=_influence_range].index)
+        score = _waypoints_data.loc[nearby_wpts]['score'].mean()
         return min(max(score, 0), 1)
 
     waypoints_data['score'] = waypoints_data.apply(
-        lambda row: update_waypoint_data_function(row, waypoints_data, influence_matrix),
+        lambda row: update_waypoint_score(row, waypoints_data, influence_matrix),
+        axis=1
+    )
+    waypoints_data['group_score'] = waypoints_data.apply(
+        lambda row: update_waypoint_group_score(row, waypoints_data, distance_matrix, influence_range),
         axis=1
     )
     return waypoints_data
@@ -80,22 +92,39 @@ def create_influence_matrix(waypoints, dist_matrix, max_range):
     influence_matrix = pd.DataFrame(index=waypoints, columns=waypoints)
     for wp1 in tqdm(waypoints):
         for wp2 in waypoints:
-            influence_matrix.at[wp1, wp2] = InfluenceFunctions.linear(dist_matrix.at[wp1, wp2], max_range)
+            influence_matrix.at[wp1, wp2] = InfluenceFunctions.log(
+                dist_matrix.at[wp1, wp2], max_range)
+    # x, y = zip(*waypoints)
+    # mid_x = (max(x) - min(x)) / 2
+    # mid_y = (max(y) - min(y)) / 2
+    # middle = {wp: euclidean(wp, (mid_x, mid_y)) for wp in waypoints}
+    # middle = min(middle, key=middle.get)
+    # fig, ax = plt.subplots()
+    # scrs = influence_matrix[middle].to_list()
+    # ax.scatter(x, y, c=scrs, cmap="autumn", vmin=0, vmax=1)
+    # ax.scatter(mid_x, mid_x, c='blue')
+    # path = "./plots/infl_matrix_log.png"
+    # automkdir(path)
+    # plt.savefig(path)
+    # plt.close()
     return influence_matrix
 
 
-def update_route_function(init_tour, waypoints_data, dist_matrix, route_as_visited, mode='order_scores'):
+def update_route_function(init_tour, waypoints_data, dist_matrix,
+                          route_as_visited, mode='do_nothing'):
     mode = mode.lower()
     new_tour = list()
     _wp = route_as_visited[-1]
     # waypoints_to_visit = waypoints_data[(waypoints_data['in_sbw'] == True) & (waypoints_data['visited'] == False)]
     waypoints_to_visit = waypoints_data[(waypoints_data['score'] > 0) & (waypoints_data['visited'] == False)]
-    if mode in {'order_scores', 'scores_in_order'}:
+    if mode in {'do_nothing'}:
+        new_tour = init_tour[:]
+    elif mode in {'order_scores', 'scores_in_order'}:
         new_tour = waypoints_to_visit.sort_values('score', ascending=False)["_wp"].to_list()
+    elif mode in {'group_scores_in_order'}:
+        new_tour = waypoints_to_visit.sort_values('group_score', ascending=False)["_wp"].to_list()
     elif mode in {'ni', 'nearest_insertion'}:
         new_tour, dist = route_case(waypoints_to_visit["_wp"].to_list())
-    elif mode in {'do_nothing'}:
-        new_tour = init_tour[:]
     elif mode in {'dcf_by_dist', 'dcf_by_distance'}:
         ...  # todo
     else:
@@ -103,17 +132,21 @@ def update_route_function(init_tour, waypoints_data, dist_matrix, route_as_visit
     return new_tour
 
 
-def dynamic_route_with_init_route(waypoints, waypoints_data, dist_matrix):
+def dynamic_route_with_init_route(waypoints, waypoints_data, dist_matrix,
+                                  influence_range=250, routing_mode='group_scores_in_order', notes=''):
     route_as_visited = []
     init_waypoints_to_route = list(waypoints_data[waypoints_data['in_sbw'] == True].index)
     tour, dist = route_case(init_waypoints_to_route)
     score_matrix = pd.DataFrame(index=waypoints, columns=waypoints)
     score_matrix.fillna(0.5, inplace=True)
-    plot_stuff(waypoints_data, f"./dynamic_route/with_route_{datetime_string()}/debut.png")
-    plot_stuff(waypoints_data, f"./dynamic_route/no_route_{datetime_string()}/debut.png")
-    influence_matrix = create_influence_matrix(waypoints, dist_matrix, 500)
+    influence_matrix = create_influence_matrix(waypoints, dist_matrix, influence_range)
     n_waypoints_to_visit = len(waypoints_data[waypoints_data['in_sbw'] == True])
-    idx, update_route, _fin = 0, False, True
+    idx, update_route, found = 0, False, False
+    info1, fin1, info2, fin2 = "N/A 1", False, "N/A 2", False
+    # plot_stuff(waypoints_data, f"./dynamic_route/{routing_mode}_with_route_{datetime_string()}_{notes}/route_{idx:05d}.png")
+    # plot_stuff(waypoints_data, f"./dynamic_route/{routing_mode}_no_route_{datetime_string()}_{notes}/route_{idx:05d}.png")
+    p_bar = tqdm(desc=f"Running Dynamic Program {routing_mode}", total=n_waypoints_to_visit)
+    n_visit_first_uncover, n_visit_all_uncover = None, None
     while True:
         idx += 1
         if len(tour) <= 0:
@@ -124,30 +157,49 @@ def dynamic_route_with_init_route(waypoints, waypoints_data, dist_matrix):
         waypoints_data.at[wp, "visited"] = True
         if waypoints_data.loc[[wp]].damaged.bool():
             waypoints_data.at[wp, 'score'] = 1
-            waypoints_data.at[wp, 'base_score'] = 2
-            waypoints_data = update_scores(waypoints_data, influence_matrix)
-            update_route = True
+            waypoints_data.at[wp, 'base_score'] = 5
+            update_route, found = True, True
         else:
             waypoints_data.at[wp, 'score'] = 0
             waypoints_data.at[wp, 'base_score'] = 0
-            waypoints_data = update_scores(waypoints_data, influence_matrix)
-        print(waypoints_data.loc[[wp]])
+            found = False
+        waypoints_data = update_scores(waypoints_data,
+                                       influence_matrix,
+                                       dist_matrix,
+                                       influence_range)
+
+        # print(waypoints_data.loc[[wp]])
         route_as_visited.append(wp)
-        plot_stuff(waypoints_data, f"./dynamic_route/with_route_{datetime_string()}/route_{idx:05d}.png",
-                   route=route_as_visited)
-        plot_stuff(waypoints_data, f"./dynamic_route/no_route_{datetime_string()}/route_{idx:05d}.png")
+        # plot_stuff(waypoints_data,
+        #            f"./dynamic_route/{routing_mode}_with_route_{datetime_string()}_{notes}/route_{idx:05d}.png",route=route_as_visited)
+        # plot_stuff(waypoints_data,
+        #            f"./dynamic_route/{routing_mode}_no_route_{datetime_string()}_{notes}/route_{idx:05d}.png")
         if update_route:
-            tour = update_route_function(tour, waypoints_data, dist_matrix, route_as_visited)
-        if _fin and len(waypoints_data[(waypoints_data.visited == False) & (waypoints_data.damaged ==True)]) <= 0:
-            info = f"Found all damaged points after {len(route_as_visited)} waypoints " \
-                   f"vs an initial route of {n_waypoints_to_visit}"
-            _fin = False
+            if found:
+                tour = update_route_function(tour, waypoints_data, dist_matrix, route_as_visited, mode=routing_mode)
+            else:
+                tour = update_route_function(tour, waypoints_data, dist_matrix, route_as_visited, mode=routing_mode)
+        if not fin2 and len(waypoints_data[(waypoints_data.visited == True) & (waypoints_data.damaged == True)]) == \
+                len(waypoints_data[(waypoints_data.damaged == True)]):
+            info2 = f"Found all damaged points after {len(route_as_visited)} waypoints " \
+                    f"vs an initial route of {n_waypoints_to_visit}"
+            fin2 = True
+            n_visit_all_uncover = len(route_as_visited)
+        if not fin1 and len(waypoints_data[(waypoints_data.visited == True) & (waypoints_data.damaged == True)]) == 1:
+            info1 = f"Found first damaged point after {len(route_as_visited)} waypoints " \
+                    f"vs an initial route of {n_waypoints_to_visit}"
+            fin1 = True
+            n_visit_first_uncover = len(route_as_visited)
+        p_bar.update()
     idx += 1
-    plot_stuff(waypoints_data, f"./dynamic_route/with_route_{datetime_string()}/route_{idx:05d}_fin.png",
-               route=route_as_visited)
-    plot_stuff(waypoints_data, f"./dynamic_route/no_route_{datetime_string()}/route_{idx:05d}_fin.png")
-    print(info)
+    # plot_stuff(waypoints_data, f"./dynamic_route/with_route_{datetime_string()}/route_{idx:05d}_fin.png",
+    #            route=route_as_visited)
+    # plot_stuff(waypoints_data, f"./dynamic_route/no_route_{datetime_string()}/route_{idx:05d}_fin.png")
+    print(info1)
+    print(info2)
     print(f"TADA")
+    return n_waypoints_to_visit, n_visit_first_uncover, n_visit_all_uncover
+
 
 
 def route_case(waypoints):
